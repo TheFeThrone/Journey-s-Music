@@ -105,6 +105,7 @@ export default {
                 .setTitle('🛠Config🛠')
                 .setDescription('The following configs have been saved.');
 
+            const platformEntries = Object.entries(config.platform);
             const platformListString = platformEntries
                 .map(([, platform]) => `${platform.enabled ? '✅' : '❌'} ${platform.name}`)
                 .join('\n');
