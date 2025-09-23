@@ -1,4 +1,4 @@
-# Journey-s-Music
+# Journey's Music
 
 ![Frieren Searching](frieren_analysis.gif)
 
