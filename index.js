@@ -49,7 +49,7 @@ async function changePresence(name, status){
 client.login(process.env.TOKEN).catch(err => {
     console.error("Login failed!", err);
     proccess.exit(1);
-}
+});
 
 client.on('ready', async () => {
     startHeartbeat(10);
