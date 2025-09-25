@@ -22,7 +22,7 @@
         },
         "youtube": {
             "name": "YouTube",
-            "prefix": "www.youtube",
+            "prefix": "www.youtu",
             "enabled": true
         },
         "appleMusic": {
