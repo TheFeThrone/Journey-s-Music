@@ -3,6 +3,20 @@ import config from './config.json' assert { type: "json" };
 import { analyzeMusic } from './messageHandlers/analyzeMusic.js';
 import platforms from './commands/platforms.js';
 import { syncCommand } from './deploy-commands.js';
+import https from 'https';
+
+const HEALTHCHECK_URL = process.env.HEALTHCHECK_URL;
+if (HEALTHCHECK_URL) {
+  console.log("Healthcheck_URL found");
+  // Ping every 10 minutes
+  setInterval(() => {
+    https.get(HEALTHCHECK_URL).on("error", (err) => {
+      console.error("Healthcheck ping failed:", err);
+    });
+  }, 10 * 60 * 1000); // 10 minutes in milliseconds
+
+  https.get(HEALTHCHECK_URL).on("error", (err) => console.error("Healthcheck ping failed:", err));
+}
 
 const client = new Client({
     intents: [
@@ -17,16 +31,33 @@ const commands = [
     platforms
 ];
 
+async function changePresence(name, status){
+    await client.user.setPresence({
+        status: status,
+	activities: [{
+            type: 4,
+            emoji: '<:frieren_heart_pink:1242819328194117775>',
+            name: name
+	}]
+    });
+}
+
 client.login(process.env.TOKEN);
 
-client.on('clientReady', async () => {
+client.on('ready', async () => {
+    let message = `Logged in as ${client.user.tag} in:\n`
     for (const guild of client.guilds.cache.values()) {
-        console.info(`Logged in as ${client.user.tag} in ${guild.name}!`);
+        message += `- ${guild.name}\n`;
+    }
+    await changePresence("Getting ready for the Journey","idle");
+    console.info(message.trim());
+    for (const guild of client.guilds.cache.values()) {
         for (const command of commands) {
             client.commands.set(command.data.name, command);
-            await syncCommand(client, guild, command);
+	    await syncCommand(client, guild, command);
         }
     }
+    await changePresence("Being an innocent elf on a Journey", "online");
 });
 
 client.on("guildCreate", async () => {
@@ -61,5 +92,7 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageCreate', async (foundMessage) => {
+    await changePresence("Analyzing music heard on the Journey", "idle");
     await analyzeMusic(foundMessage, config);
+    await changePresence("Being an innocent elf on a Journey", "online");
 });
