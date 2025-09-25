@@ -6,16 +6,20 @@ import { syncCommand } from './deploy-commands.js';
 import https from 'https';
 
 const HEALTHCHECK_URL = process.env.HEALTHCHECK_URL;
-if (HEALTHCHECK_URL) {
-  console.log("Healthcheck_URL found");
-  // Ping every 10 minutes
-  setInterval(() => {
-    https.get(HEALTHCHECK_URL).on("error", (err) => {
-      console.error("Healthcheck ping failed:", err);
-    });
-  }, 10 * 60 * 1000); // 10 minutes in milliseconds
+function startHeartbeat(minutes){
+    if (HEALTHCHECK_URL) {
+        console.log("Healthcheck_URL found");
+        // Ping every <minutes> minutes
+        setInterval(() => {
+            https.get(HEALTHCHECK_URL).on("error", (err) => {
+            console.error("Healthcheck ping failed:", err);
+          });
+        }, minutes * 60 * 1000); // 10 minutes in milliseconds
 
-  https.get(HEALTHCHECK_URL).on("error", (err) => console.error("Healthcheck ping failed:", err));
+        https.get(HEALTHCHECK_URL).on("error", (err) => console.error("Healthcheck ping failed:", err));
+    } else {
+        console.warn("No Healthcheck_URL found. Checking for heartbeat might be impoortant");
+    }
 }
 
 const client = new Client({
@@ -42,9 +46,13 @@ async function changePresence(name, status){
     });
 }
 
-client.login(process.env.TOKEN);
+client.login(process.env.TOKEN).catch(err => {
+    console.error("Login failed!", err);
+    proccess.exit(1);
+}
 
 client.on('ready', async () => {
+    startHeartbeat(10);
     let message = `Logged in as ${client.user.tag} in:\n`
     for (const guild of client.guilds.cache.values()) {
         message += `- ${guild.name}\n`;
