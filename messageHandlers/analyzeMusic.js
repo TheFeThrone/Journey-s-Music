@@ -32,9 +32,14 @@ export async function analyzeMusic(foundMessage, config, serverId) {
 	    const platforms = data.linksByPlatform;
             const allButtons = [];
 
+            const allAreYouTube = Object.keys(platforms).every(key => key.toLowerCase().includes('youtube'));
+            if (allAreYouTube) return;
+
             if (!hasSpotifyLink && !hasYouTubeLink) {
                 await foundMessage.channel.send({content: `🎶Frieren hums the Musik she hears🎶[.](${platforms.spotify.url})`, flags: 4096});
             }
+
+
             const firstEntityKey = Object.keys(data.entitiesByUniqueId)[0];
             const entity = data.entitiesByUniqueId[firstEntityKey];
             const title = entity ? entity.title : 'Unknown Title';
@@ -52,6 +57,7 @@ export async function analyzeMusic(foundMessage, config, serverId) {
                     );
                 }
             }
+
             if (allButtons.length > 0) {
                 const actionRows = [];
                 // Batch buttons into rows of up to 5
