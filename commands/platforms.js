@@ -1,11 +1,5 @@
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } from 'discord.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const configPath = path.join(__dirname, '../../config.json');
+import { getServerSettings, updatePlatformSetting } from '../database.js';
 
 /**
  * A helper function to generate the embed and button components based on the current config.
@@ -13,16 +7,16 @@ const configPath = path.join(__dirname, '../../config.json');
  * @param {object} config The current configuration object.
  * @returns {{embeds: EmbedBuilder[], components: ActionRowBuilder[]}}
  */
-const generateComponents = (config) => {
+const generateComponents = (serverSettings, color) => {
     const statusEmbed = new EmbedBuilder()
-        .setColor(config.color)
-        .setTitle('🛠Config🛠')
+        .setColor(color)
+        .setTitle('🛠 Config 🛠')
         .setDescription('Configure which platforms should be shown after analysis. Click a button below to toggle the status for that platform.')
         .setFooter({ text: 'Interaction ends in 5 minutes'});
 
-    const platformEntries = Object.entries(config.platform);
+    const platformEntries = Object.entries(serverSettings);
     const platformListString = platformEntries
-        .map(([, platform]) => `${platform.enabled ? '✅' : '❌'} ${platform.name}`)
+        .map(([key, platform]) => `${platform.enabled ? '✅' : '❌'} ${platform.name}`)
         .join('\n');
 
     // Add the list as a single field to the embed.
@@ -32,7 +26,7 @@ const generateComponents = (config) => {
     for (let i = 0; i < platformEntries.length; i += 5) {
         const row = new ActionRowBuilder();
         const chunk = platformEntries.slice(i, i + 5);
-        
+
         chunk.forEach(([key, platform]) => {
             row.addComponents(
                 new ButtonBuilder()
@@ -43,7 +37,7 @@ const generateComponents = (config) => {
         });
         components.push(row);
     }
-    
+
     // Add a final row for the 'Done' button
     const finalRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -52,8 +46,8 @@ const generateComponents = (config) => {
             .setStyle(ButtonStyle.Primary)
     );
     components.push(finalRow);
-    
-    
+
+
     return { embeds: [statusEmbed], components };
 };
 
@@ -63,17 +57,18 @@ export default {
         .setDescription('Configure which platforms should be shown after analysis.'),
 
     async execute(interaction, config) {
-        const initialComponents = generateComponents(config);
+        const serverId = interaction.guildId;
+	let serverSettings = await getServerSettings(serverId);
 
         const message = await interaction.reply({
-            ...initialComponents,
+            ...generateComponents(serverSettings, config.color),
             ephemeral: true,
             fetchReply: true,
         });
 
         const collector = message.createMessageComponentCollector({
             componentType: ComponentType.Button,
-            time: 300000, 
+            time: 300000,
         });
 
         collector.on('collect', async buttonInteraction => {
@@ -84,35 +79,36 @@ export default {
             }
 
             const platformKey = buttonInteraction.customId.split('_')[1];
+	    if (!serverSettings[platformKey]) return;
 
-            if (config.platform[platformKey]) {
-                config.platform[platformKey].enabled = !config.platform[platformKey].enabled;
+            const newEnabled = !serverSettings[platformKey].enabled;
 
-                fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-                
-                const updatedComponents = generateComponents(config);
+            // Update the database
+            await updatePlatformSetting(serverId, platformKey, newEnabled);
 
-                // Update the message with the new state
-                await buttonInteraction.update(updatedComponents);
-            }
+            // Update local state
+            serverSettings[platformKey].enabled = newEnabled;
+
+            // Update the message
+            await buttonInteraction.update(generateComponents(serverSettings, config.color));
+
         });
-        
+
         // When the collector ends (by timeout or by clicking "Done")
         collector.on('end', async () => {
             // Create a final, static embed showing the confirmed state.
             const finalEmbed = new EmbedBuilder()
                 .setColor(config.color)
-                .setTitle('🛠Config🛠')
+                .setTitle('🛠 Config 🛠')
                 .setDescription('The following configs have been saved.');
 
-            const platformEntries = Object.entries(config.platform);
-            const platformListString = platformEntries
-                .map(([, platform]) => `${platform.enabled ? '✅' : '❌'} ${platform.name}`)
+	    const platformListString = Object.values(serverSettings)
+                .map(p => `${p.enabled ? '✅' : '❌'} ${p.name}`)
                 .join('\n');
 
-            // Add the list as a single field to the embed.
+	    // Add the list as a single field to the embed.
             finalEmbed.addFields({ name: 'All Platforms', value: platformListString });
-            
+
             // Edit the reply to show the final embed and remove all buttons.
             await interaction.editReply({ embeds: [finalEmbed], components: [] });
         });

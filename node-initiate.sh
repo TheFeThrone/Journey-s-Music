@@ -49,7 +49,7 @@ while true; do
   TMP_LOG=$(mktemp)
 
   # Stream output to both bot.log and temporary file
-  node index.js 2>&1 | tee >(ts '[%Y-%m-%d %H:%M:%S]' >> bot.log) > "$TMP_LOG"
+  node --trace-warnings index.js 2>&1 | tee >(ts '[%Y-%m-%d %H:%M:%S]' >> bot.log) > "$TMP_LOG"
   EXIT_CODE=${PIPESTATUS[0]}
 
   if [ $EXIT_CODE -ne 0 ]; then

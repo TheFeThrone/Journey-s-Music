@@ -3,6 +3,7 @@ import config from './config.json' assert { type: "json" };
 import { analyzeMusic } from './messageHandlers/analyzeMusic.js';
 import platforms from './commands/platforms.js';
 import { syncCommand } from './deploy-commands.js';
+import { initializeServerSettings, deleteServerSettings, createTables } from './database.js';
 import https from 'https';
 
 const HEALTHCHECK_URL = process.env.HEALTHCHECK_URL;
@@ -46,22 +47,27 @@ async function changePresence(name, status){
     });
 }
 
+await createTables();
+
 client.login(process.env.TOKEN).catch(err => {
     console.error("Login failed!", err);
-    proccess.exit(1);
+    process.exit(1);
 });
 
 client.on('ready', async () => {
     startHeartbeat(10);
     let message = `Logged in as ${client.user.tag} in:\n`
     for (const guild of client.guilds.cache.values()) {
+        await initializeServerSettings(guild.id);
         message += `- ${guild.name}\n`;
     }
     await changePresence("Getting ready for the Journey","idle");
     console.info(message.trim());
+    for (const command of commands) {
+        client.commands.set(command.data.name, command);
+    }
     for (const guild of client.guilds.cache.values()) {
         for (const command of commands) {
-            client.commands.set(command.data.name, command);
 	    await syncCommand(client, guild, command);
         }
     }
@@ -69,13 +75,17 @@ client.on('ready', async () => {
 });
 
 client.on("guildCreate", async () => {
-    for (const guild of client.guilds.cache.values()) {
-        console.info(`Added to ${client.user.tag} in ${guild.name}!`);
-        for (const command of commands) {
-            client.commands.set(command.data.name, command);
-            await syncCommand(client, guild, command);
-        }
+    console.info(`Added to ${client.user.tag} in ${guild.name}!`);
+    await initializeServerSettings(guild.id);
+    for (const command of commands) {
+        client.commands.set(command.data.name, command);
+        await syncCommand(client, guild, command);
     }
+});
+
+client.on("guildDelete", async (guild) => {
+    console.info(`Removed from ${guild.name}. Deleting settings.`);
+    await deleteServerSettings(guild.id);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -100,7 +110,8 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageCreate', async (foundMessage) => {
+    if (foundMessage.author.bot || !foundMessage.guildId) return;
     await changePresence("Analyzing music heard on the Journey", "idle");
-    await analyzeMusic(foundMessage, config);
+    await analyzeMusic(foundMessage, config, foundMessage.guildId);
     await changePresence("Being an innocent elf on a Journey", "online");
 });
