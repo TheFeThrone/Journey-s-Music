@@ -16,9 +16,11 @@ Any message sent that includes a share link of a music platform gets processed t
 3. The Title and Artist(s) are shown with Link Buttons below them reaching to every enabled music platform
 
 This works by using the API of https://song.link/ aka. https://odesli.co/ to search for existing platforms
+<img width="661" height="494" alt="image" src="https://github.com/user-attachments/assets/6b8cc46b-75c9-45a4-a016-a29c239de54e" />
 
 ### /platforms
 Toggle which platforms to show as link buttons under the embed
+<img width="607" height="607" alt="image" src="https://github.com/user-attachments/assets/8ec5fa89-d460-4ed0-8f31-90b1d72f4e80" />
 
 ## TODO
-- [ ] Work with a database instead of a .json thats rewritten 
+- [x] Work with a database instead of a .json thats rewritten 
