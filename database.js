@@ -18,7 +18,7 @@ const VALID_PLATFORMS = [
     { key: 'appleMusic', name: 'Apple Music', prefix: 'music.apple', default_enabled: true },
     { key: 'deezer', name: 'Deezer', prefix: 'deezer.com', default_enabled: true },
     { key: 'soundcloud', name: 'SoundCloud', prefix: 'soundcloud.com', default_enabled: false },
-    { key: 'anghami', name: 'Anghami', prefix: 'anghami.com', default_enabled: false },
+    { key: 'anghami', name: 'Anghami', prefix: 'anghami.', default_enabled: false },
     { key: 'audiomack', name: 'Audiomack', prefix: 'audiomack.com', default_enabled: false },
     { key: 'pandora', name: 'Pandora', prefix: 'pandora.com', default_enabled: false },
     { key: 'yandex', name: 'Yandex', prefix: 'music.yandex', default_enabled: false },
