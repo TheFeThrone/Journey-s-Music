@@ -23,6 +23,9 @@ export async function analyzeMusic(foundMessage, config, serverId) {
 
 	const hasSpotifyLink = link.includes(serverSettings.spotify.prefix);
 	const hasYouTubeLink = link.includes(serverSettings.youtube.prefix);
+        const hasAppleMusicLink = link.includes(serverSettings.appleMusic.prefix);
+        const hasAmazonMusicLink = link.includes(serverSettings.amazonMusic.prefix);
+        const hasSoundCloudLink = link.includes(serverSettings.soundcloud.prefix);
 
         // Call the music matching API (e.g., Odesli/Songlink)
         const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}`);
@@ -35,8 +38,8 @@ export async function analyzeMusic(foundMessage, config, serverId) {
             const allAreYouTube = Object.keys(platforms).every(key => key.toLowerCase().includes('youtube'));
             if (allAreYouTube) return;
 
-            if (!hasSpotifyLink && !hasYouTubeLink) {
-                await foundMessage.channel.send({content: `🎶Frieren hums the Musik she hears🎶[.](${platforms.spotify.url})`, flags: 4096});
+            if (!hasSpotifyLink && !hasYouTubeLink && !hasAppleMusicLink && !hasAmazonMusicLink && !hasSoundCloudLink) {
+                await foundMessage.channel.send({content: `🎶Frieren hums the Music she hears🎶[.](${platforms.spotify.url})`, flags: 4096});
             }
 
 
