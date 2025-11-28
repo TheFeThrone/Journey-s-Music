@@ -21,11 +21,15 @@ export async function analyzeMusic(foundMessage, config, serverId) {
 	);
         if (!link) return;
 
+        // Vars for platforms with already embedded audio
 	const hasSpotifyLink = link.includes(serverSettings.spotify.prefix);
 	const hasYouTubeLink = link.includes(serverSettings.youtube.prefix);
         const hasAppleMusicLink = link.includes(serverSettings.appleMusic.prefix);
         const hasAmazonMusicLink = link.includes(serverSettings.amazonMusic.prefix);
         const hasSoundCloudLink = link.includes(serverSettings.soundcloud.prefix);
+
+        // TODO: tidal specific api call with https://tidal.com/smart-links/$tidal-path-without-?u
+        const hasTidalLink = link.includes(serverSettings.soundcloud.prefix);
 
         // Call the music matching API (e.g., Odesli/Songlink)
         const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}`);
@@ -36,10 +40,18 @@ export async function analyzeMusic(foundMessage, config, serverId) {
             const allButtons = [];
 
             const allAreYouTube = Object.keys(platforms).every(key => key.toLowerCase().includes('youtube'));
-            if (allAreYouTube) return;
-
+            if (hasYouTubeLink && allAreYouTube) {
+                return;
+            }
             if (!hasSpotifyLink && !hasYouTubeLink && !hasAppleMusicLink && !hasAmazonMusicLink && !hasSoundCloudLink) {
-                await foundMessage.channel.send({content: `🎶Frieren hums the Music she hears🎶[.](${platforms.spotify.url})`, flags: 4096});
+                const embeddedLink = platforms.soundcloud ? platforms.soundcloud.url :
+                                   platforms.spotify ? platforms.spotify.url :
+                                   platforms.appleMusic ? platforms.appleMusic.url :
+                                   platforms.amazonMusic ? platforms.amazonMusic.url :
+                                   platforms.youtube ? platforms.youtube.url : false;
+                if (embeddedLink) {
+                    await foundMessage.channel.send({content: `🎶Frieren hums the Music she hears🎶[.](${embeddedLink})`, flags: 4096});
+                }
             }
 
 
