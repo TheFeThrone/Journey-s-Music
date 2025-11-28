@@ -2,6 +2,7 @@ import { Client, GatewayIntentBits, Collection } from 'discord.js';
 import config from './config.json' assert { type: "json" };
 import { analyzeMusic } from './messageHandlers/analyzeMusic.js';
 import platforms from './commands/platforms.js';
+import country from './commands/country.js';
 import { syncCommand } from './deploy-commands.js';
 import { initializeServerSettings, deleteServerSettings, createTables } from './database.js';
 import https from 'https';
@@ -33,7 +34,8 @@ const client = new Client({
 });
 client.commands = new Collection();
 const commands = [
-    platforms
+    platforms,
+    country
 ];
 
 async function changePresence(name, status){
@@ -58,7 +60,7 @@ client.on('ready', async () => {
     startHeartbeat(10);
     let message = `Logged in as ${client.user.tag} in:\n`
     for (const guild of client.guilds.cache.values()) {
-        await initializeServerSettings(guild.id);
+        await initializeServerSettings(guild.id, guild.name);
         message += `- ${guild.name}\n`;
     }
     await changePresence("Getting ready for the Journey","idle");
@@ -76,7 +78,7 @@ client.on('ready', async () => {
 
 client.on("guildCreate", async () => {
     console.info(`Added to ${client.user.tag} in ${guild.name}!`);
-    await initializeServerSettings(guild.id);
+    await initializeServerSettings(guild.id, guild.name);
     for (const command of commands) {
         client.commands.set(command.data.name, command);
         await syncCommand(client, guild, command);

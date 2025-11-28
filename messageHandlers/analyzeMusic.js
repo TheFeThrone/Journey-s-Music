@@ -6,6 +6,7 @@ export async function analyzeMusic(foundMessage, config, serverId) {
     if (foundMessage.author.bot) return;
 
     const serverSettings = await getServerSettings(serverId)
+    const serverCountry = serverSettings.country;
 
     // Check if the message contains a link from the config file
     const isMusicLink = Object.keys(serverSettings).some(
@@ -32,7 +33,7 @@ export async function analyzeMusic(foundMessage, config, serverId) {
         const hasTidalLink = link.includes(serverSettings.soundcloud.prefix);
 
         // Call the music matching API (e.g., Odesli/Songlink)
-        const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}`);
+        const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}$userCountry=${serverCountry}`);
         const data = await apiResponse.json();
 
         if (data && data.linksByPlatform) {
@@ -94,5 +95,4 @@ export async function analyzeMusic(foundMessage, config, serverId) {
     } catch (error) {
         console.error('Error fetching music links:', error);
     }
-
 }

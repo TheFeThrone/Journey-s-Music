@@ -55,7 +55,8 @@ export async function createTables() {
                 id BIGINT PRIMARY KEY,
                 name TEXT,
                 initialized BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                country TEXT DEFAULT 'DE'
             );
         `);
 
@@ -78,17 +79,15 @@ export async function createTables() {
 /**
  * Initializes default platform settings for a server.
  */
-export async function initializeServerSettings(serverId) {
+export async function initializeServerSettings(serverId, serverName) {
     try {
-	// check if server exists
 	await pool.query(
-		'INSERT INTO servers (id) VALUES ($1) ON CONFLICT (id) DO NOTHING',
-                [serverId]
+		'INSERT INTO servers (id, name) VALUES ($1, $2, FALSE) ON CONFLICT (id) DO SET name = $2 RETURNING initialized)',
+                [serverId, serverName]
 	);
 
-	// check if it was initialized already
         const { rows } = await pool.query(
-		'SELECT initialized FROM servers WHERE id = $1',
+		'SELECT initialized FROM servers WHERE id = $1 FOR UPDATE',
        		[serverId]
 	);
 
@@ -158,6 +157,30 @@ export async function getServerSettings(serverId) {
     } catch (error) {
         console.error('Error fetching server settings:', error);
         return null;
+    }
+}
+export async function updateCountrySettings(serverId, countryCode) {
+    try {
+        const { rows } = await pool.query(
+            'SELECT id FROM servers WHERE id = $1',
+            [serverId]
+        );
+        if (rows.length === 0) {
+            console.error(`Invalid serverID: ${serverId}`);
+            return;
+        }
+        const updateResult = await pool.query(
+            'UPDATE servers SET country = $1 WHERE id = $2',
+            [countryCode, serverId]
+        );
+
+        if (updateResult.rowCount === 1) {
+            console.log(`Successfully updated country for server ${serverId} to ${countryCode}.`);
+        } else {
+            console.error(`Update failed for server ${serverId}.`);
+        }
+    }catch (error) {
+        console.error('Database error during country settings update:', error);
     }
 }
 
