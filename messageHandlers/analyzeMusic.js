@@ -13,6 +13,7 @@ export async function analyzeMusic(foundMessage, config, serverId) {
         platformKey => serverSettings[platformKey].enabled && foundMessage.content.includes(serverSettings[platformKey].prefix)
     );
     if (!isMusicLink) return;
+
     try {
 	// Find the first valid link in the message content
 	const link = foundMessage.content.split(/\s+/).find(word =>
@@ -28,12 +29,13 @@ export async function analyzeMusic(foundMessage, config, serverId) {
         const hasAppleMusicLink = link.includes(serverSettings.appleMusic.prefix);
         const hasAmazonMusicLink = link.includes(serverSettings.amazonMusic.prefix);
         const hasSoundCloudLink = link.includes(serverSettings.soundcloud.prefix);
+        const hasEmbed = (hasSpotifyLink || hasYouTubeLink || hasAppleMusicLink || hasAmazonMusicLink || hasSoundCloudLink);
 
         // TODO: tidal specific api call with https://tidal.com/smart-links/$tidal-path-without-?u
-        const hasTidalLink = link.includes(serverSettings.soundcloud.prefix);
+        const hasTidalLink = link.includes(serverSettings.tidal.prefix);
 
         // Call the music matching API (e.g., Odesli/Songlink)
-        const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}$userCountry=${serverCountry}`);
+        const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}&userCountry=${serverCountry}`);
         const data = await apiResponse.json();
 
         if (data && data.linksByPlatform) {
@@ -44,17 +46,16 @@ export async function analyzeMusic(foundMessage, config, serverId) {
             if (hasYouTubeLink && allAreYouTube) {
                 return;
             }
-            if (!hasSpotifyLink && !hasYouTubeLink && !hasAppleMusicLink && !hasAmazonMusicLink && !hasSoundCloudLink) {
-                const embeddedLink = platforms.soundcloud ? platforms.soundcloud.url :
-                                   platforms.spotify ? platforms.spotify.url :
-                                   platforms.appleMusic ? platforms.appleMusic.url :
-                                   platforms.amazonMusic ? platforms.amazonMusic.url :
-                                   platforms.youtube ? platforms.youtube.url : false;
-                if (embeddedLink) {
-                    await foundMessage.channel.send({content: `🎶Frieren hums the Music she hears🎶[.](${embeddedLink})`, flags: 4096});
-                }
-            }
+            const embeddedLink = platforms.soundcloud ? platforms.soundcloud.url :
+                               platforms.youtube ? platforms.youtube.url :
+                               platforms.spotify ? platforms.spotify.url :
+                               platforms.appleMusic ? platforms.appleMusic.url :
+                               platforms.amazonMusic ? platforms.amazonMusic.url : false;
 
+            await foundMessage.suppressEmbeds(true);
+            if (embeddedLink) {
+                await foundMessage.channel.send({content: `🎶Frieren hums the Music she hears🎶[.](${embeddedLink})`, flags: 4096});
+            }
 
             const firstEntityKey = Object.keys(data.entitiesByUniqueId)[0];
             const entity = data.entitiesByUniqueId[firstEntityKey];
@@ -88,11 +89,10 @@ export async function analyzeMusic(foundMessage, config, serverId) {
                     .setTitle(`✨Frieren has finished analyzing the song!✨`)
                     .setDescription(`${title} - ${artist}`)
                     .setThumbnail(`attachment://${attachment.name}`)
-
                 await foundMessage.channel.send({ embeds: [embed], components: actionRows, files: [attachment], flags: 4096 });
             }
         }
     } catch (error) {
-        console.error('Error fetching music links:', error);
+        console.error('Error:', error);
     }
 }
