@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Collection, MessageFlags } from 'discord.js';
-import config from './config.json' assert  { type: "json" };
+import config from './config.json' with { type: "json" };
 import { analyzeMusic } from './messageHandlers/analyzeMusic.js';
 import platforms from './commands/platforms.js';
 import country from './commands/country.js';

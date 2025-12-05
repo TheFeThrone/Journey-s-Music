@@ -1,4 +1,4 @@
-import config from './config.json' assert  { type: "json" };
+import config from './config.json' with { type: "json" };
 import 'dotenv/config';
 import pg from "pg";
 const { Pool } = pg;

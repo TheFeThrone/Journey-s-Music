@@ -1,6 +1,6 @@
 import { ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, SlashCommandBuilder, ComponentType, MessageFlags } from 'discord.js';
 import { getPlatformSettings, updateCountrySettings, getCustomSettings } from '../database.js';
-import COUNTRY_MAP from '../country_map.json' assert  { type: 'json' };
+import COUNTRY_MAP from '../country_map.json' with { type: 'json' };
 
 const ALPHABET_RANGES = [
     { label: 'AG - BJ', startCode: 'AG', endCode: 'BJ' },

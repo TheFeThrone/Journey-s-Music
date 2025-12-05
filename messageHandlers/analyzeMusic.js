@@ -1,5 +1,5 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
-import config from '../config.json' assert  { type: "json" };
+import config from '../config.json' with { type: "json" };
 import fetch from 'node-fetch';
 import { getPlatformSettings, getCustomSettings } from '../database.js';
 
