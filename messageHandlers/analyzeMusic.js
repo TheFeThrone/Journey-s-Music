@@ -1,45 +1,46 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
+import config from '../config.json' assert  { type: "json" };
 import fetch from 'node-fetch';
-import { getServerSettings } from '../database.js';
+import { getPlatformSettings, getCustomSettings } from '../database.js';
 
-export async function analyzeMusic(foundMessage, config, serverId) {
+export async function analyzeMusic(foundMessage, serverId) {
     if (foundMessage.author.bot) return;
 
-    const serverSettings = await getServerSettings(serverId)
-    const serverCountry = serverSettings.country;
+    const serverPlatforms = await getPlatformSettings(serverId);
+    const serverCustoms = await getCustomSettings(serverId);
 
     // Check if the message contains a link from the config file
-    const isMusicLink = Object.keys(serverSettings).some(
-        platformKey => serverSettings[platformKey].enabled && foundMessage.content.includes(serverSettings[platformKey].prefix)
+    const isMusicLink = Object.keys(serverPlatforms).some(
+        platformKey => serverPlatforms[platformKey].enabled && foundMessage.content.includes(serverPlatforms[platformKey].prefix)
     );
     if (!isMusicLink) return;
 
     try {
-	// Find the first valid link in the message content
-	const link = foundMessage.content.split(/\s+/).find(word =>
-            Object.keys(serverSettings).some(
-                platformKey => word.includes(serverSettings[platformKey].prefix)
+        // Find the first valid link in the message content
+        const link = foundMessage.content.split(/\s+/).find(word =>
+            Object.keys(serverPlatforms).some(
+                platformKey => word.includes(serverPlatforms[platformKey].prefix)
             )
-	);
+        );
         if (!link) return;
 
         // Vars for platforms with already embedded audio
-	const hasSpotifyLink = link.includes(serverSettings.spotify.prefix);
-	const hasYouTubeLink = link.includes(serverSettings.youtube.prefix);
-        const hasAppleMusicLink = link.includes(serverSettings.appleMusic.prefix);
-        const hasAmazonMusicLink = link.includes(serverSettings.amazonMusic.prefix);
-        const hasSoundCloudLink = link.includes(serverSettings.soundcloud.prefix);
+        const hasSpotifyLink = link.includes(serverPlatforms.spotify.prefix);
+        const hasYouTubeLink = link.includes(serverPlatforms.youtube.prefix);
+        const hasAppleMusicLink = link.includes(serverPlatforms.appleMusic.prefix);
+        const hasAmazonMusicLink = link.includes(serverPlatforms.amazonMusic.prefix);
+        const hasSoundCloudLink = link.includes(serverPlatforms.soundcloud.prefix);
         const hasEmbed = (hasSpotifyLink || hasYouTubeLink || hasAppleMusicLink || hasAmazonMusicLink || hasSoundCloudLink);
 
-        // TODO: tidal specific api call with https://tidal.com/smart-links/$tidal-path-without-?u
-        const hasTidalLink = link.includes(serverSettings.tidal.prefix);
+        // TODO: tidal specific api call with https://tidal.com/smart-links/${tidal-path-without-?u}
+        // const hasTidalLink = link.includes(serverPlatforms.tidal.prefix);
 
         // Call the music matching API (e.g., Odesli/Songlink)
-        const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}&userCountry=${serverCountry}`);
+        const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}&userCountry=${serverPlatforms.country}`);
         const data = await apiResponse.json();
 
         if (data && data.linksByPlatform) {
-	    const platforms = data.linksByPlatform;
+            const platforms = data.linksByPlatform;
             const allButtons = [];
 
             const allAreYouTube = Object.keys(platforms).every(key => key.toLowerCase().includes('youtube'));
@@ -54,7 +55,11 @@ export async function analyzeMusic(foundMessage, config, serverId) {
 
             await foundMessage.suppressEmbeds(true);
             if (embeddedLink) {
-                await foundMessage.channel.send({content: `🎶Frieren hums the Music she hears🎶[.](${embeddedLink})`, flags: 4096});
+                const embed = new EmbedBuilder()
+                    .setColor(serverCustoms.color)
+                    .setTitle(serverCustoms.embed_search)
+                await foundMessage.channel.send({ embeds: [embed], flags: 4096 });
+                await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: 4096 });
             }
 
             const firstEntityKey = Object.keys(data.entitiesByUniqueId)[0];
@@ -64,11 +69,11 @@ export async function analyzeMusic(foundMessage, config, serverId) {
 
             // Build a list of links for other platforms based on your config file keys
             // Create buttons for other platforms from your config file
-            for (const platformKey of Object.keys(serverSettings)) {
-                if (platforms[platformKey] && serverSettings[platformKey].enabled) {
+            for (const platformKey of Object.keys(serverPlatforms)) {
+                if (platforms[platformKey] && serverPlatforms[platformKey].enabled) {
                     allButtons.push(
                         new ButtonBuilder()
-                        .setLabel(serverSettings[platformKey].name)
+                        .setLabel(serverPlatforms[platformKey].name)
                         .setStyle(ButtonStyle.Link)
                         .setURL(platforms[platformKey].url)
                     );
@@ -83,12 +88,13 @@ export async function analyzeMusic(foundMessage, config, serverId) {
                     actionRows.push(row);
                 }
 
-                const attachment = new AttachmentBuilder(config.animation, { name: 'frieren_analysis.gif' });
+                const attachment = !serverCustoms.animation ? new AttachmentBuilder(config.animation) : null;
+                const thumbnailUrl = serverCustoms.animation ? serverCustoms.animation : `attachment://${config.animation}`;
                 const embed = new EmbedBuilder()
-                    .setColor(config.color)
-                    .setTitle(`✨Frieren has finished analyzing the song!✨`)
+                    .setColor(serverCustoms.color)
+                    .setTitle(serverCustoms.embed_final)
                     .setDescription(`${title} - ${artist}`)
-                    .setThumbnail(`attachment://${attachment.name}`)
+                    .setThumbnail(thumbnailUrl)
                 await foundMessage.channel.send({ embeds: [embed], components: actionRows, files: [attachment], flags: 4096 });
             }
         }

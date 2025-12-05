@@ -1,3 +1,5 @@
+import config from './config.json' assert  { type: "json" };
+import 'dotenv/config';
 import pg from "pg";
 const { Pool } = pg;
 
@@ -9,6 +11,8 @@ const pool = new Pool({
     port: process.env.DB_PORT,
 });
 
+// api source https://linktree.notion.site/API-d0ebe08a5e304a55928405eb682f6741
+// could need: napster, spinrilla, audius, boomplay, bandcamp
 const VALID_PLATFORMS = [
     { key: 'spotify', name: 'Spotify', prefix: 'open.spotify', default_enabled: true },
     { key: 'tidal', name: 'Tidal', prefix: 'tidal.com', default_enabled: true },
@@ -70,6 +74,19 @@ export async function createTables() {
             );
         `);
 
+        // Create server_platforms table to save each active platform for a server
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS server_customs (
+                server_id BIGINT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+                name TEXT NOT NULL DEFAULT '${config.name.replace(/'/g, "''")}',
+                color TEXT NOT NULL DEFAULT '${config.color}',
+                animation TEXT DEFAULT NULL,
+                embed_search TEXT NOT NULL DEFAULT '${config.embed_search.replace(/'/g, "''")}',
+                embed_final TEXT NOT NULL DEFAULT '${config.embed_final.replace(/'/g, "''")}',
+                PRIMARY KEY (server_id)
+            );
+        `);
+
         console.log("Tables created successfully!");
     } catch (err) {
         console.error("Error creating tables:", err);
@@ -81,32 +98,40 @@ export async function createTables() {
  */
 export async function initializeServerSettings(serverId, serverName) {
     try {
-	await pool.query(
-		'INSERT INTO servers (id, name) VALUES ($1, $2, FALSE) ON CONFLICT (id) DO SET name = $2 RETURNING initialized)',
-                [serverId, serverName]
-	);
-
         const { rows } = await pool.query(
-		'SELECT initialized FROM servers WHERE id = $1 FOR UPDATE',
-       		[serverId]
-	);
-
-	if (rows[0].initialized) {
+            `INSERT INTO servers (id, name)
+            VALUES ($1, $2)
+            ON CONFLICT (id)
+            DO UPDATE SET name = EXCLUDED.name
+            RETURNING initialized;`,
+            [serverId, serverName]
+        );
+        
+        if (rows[0]?.initialized) {
             console.log(`Server ${serverId} is already initialized. Skipping.`);
             return;
         }
 
         // Fetch only platforms with default_enabled = TRUE
-        const { rows: platforms } = await pool.query('SELECT id FROM platforms WHERE default_enabled = TRUE');
-
+        const { rows: platforms } = await pool.query(
+            'SELECT id FROM platforms WHERE default_enabled = TRUE;'
+        );
         if (platforms.length > 0) {
-            const insertValues = platforms.map(p => `(${serverId}, ${p.id}, TRUE)`).join(',');
- 	    await pool.query(
-                `INSERT INTO server_platforms (server_id, platform_id, enabled) VALUES ${insertValues} ON CONFLICT (server_id, platform_id) DO NOTHING`
+            const insertValues = platforms
+                .map(p => `(${serverId}, ${p.id}, TRUE)`)
+                .join(',');
+
+            await pool.query(
+                `INSERT INTO server_platforms (server_id, platform_id, enabled)
+                VALUES ${insertValues}
+                ON CONFLICT (server_id, platform_id) DO NOTHING;`
             );
         }
 
-	// Mark server as initialized
+        const nullSettings = {name: null, color: null, animation: null, embed_search: null, embed_final: null};
+        await updateCustomSettings(serverId, nullSettings);
+
+        // Mark server as initialized
         await pool.query(
             'UPDATE servers SET initialized = TRUE WHERE id = $1',
             [serverId]
@@ -118,40 +143,41 @@ export async function initializeServerSettings(serverId, serverName) {
     }
 }
 
+async function assureExistence(serverId){
+    const { rows: serverRows } = await pool.query(
+        'SELECT initialized FROM servers WHERE id = $1',
+        [serverId]
+    );
+    if (!serverRows[0].initialized) {
+        await initializeServerSettings(serverId, serverName);
+    }
+}
+
 /**
  * Fetch platform settings for a server
  */
-export async function getServerSettings(serverId) {
-    const query = `
-        SELECT p.key_name, p.name, p.prefix, p.default_enabled, sp.enabled
-        FROM platforms p
-        LEFT JOIN server_platforms sp
-        ON sp.platform_id = p.id AND sp.server_id = $1
-    `;
+export async function getPlatformSettings(serverId, serverName) {
     try {
-        const result = await pool.query(query, [serverId]);
-        const rows = result.rows;
+        const settings = {};
 
-        // Initialize settings if server was never initialized
-        const { rows: serverRows } = await pool.query(
-            'SELECT initialized FROM servers WHERE id = $1',
-            [serverId]
-        );
-        if (!serverRows[0].initialized) {
-            await initializeServerSettings(serverId);
-            return getServerSettings(serverId);
-        }
+        assureExistence(serverId);
+
+        const { rows } = await pool.query(`
+            SELECT p.key_name, p.name, p.prefix, p.default_enabled, sp.enabled
+            FROM platforms p
+            LEFT JOIN server_platforms sp
+            ON sp.platform_id = p.id AND sp.server_id = $1;
+        `, [serverId]);
 
         // Transform rows into key -> { name, prefix, default, enabled }
-        const settings = {};
-        rows.forEach(r => {
+        for (const r of rows) {
             settings[r.key_name] = {
                 name: r.name,
                 prefix: r.prefix,
                 default: r.default_enabled,
-                enabled: !!r.enabled // true if exists, false if null
+                enabled: !!r.enabled
             };
-        });
+        };
 
         return settings;
     } catch (error) {
@@ -159,18 +185,68 @@ export async function getServerSettings(serverId) {
         return null;
     }
 }
-export async function updateCountrySettings(serverId, countryCode) {
+
+export async function getCustomSettings(serverId) {
     try {
         const { rows } = await pool.query(
-            'SELECT id FROM servers WHERE id = $1',
+            `SELECT name, color, animation, embed_search, embed_final
+             FROM server_customs
+             WHERE server_id = $1`,
             [serverId]
         );
+
         if (rows.length === 0) {
-            console.error(`Invalid serverID: ${serverId}`);
-            return;
+            // If no row exists, return defaults
+            return {
+                name: config.name,
+                color: config.color,
+                animation: null,
+                embed_search: config.embed_search,
+                embed_final: config.embed_final
+            };
         }
-        const updateResult = await pool.query(
-            'UPDATE servers SET country = $1 WHERE id = $2',
+
+        return rows[0];
+    } catch (err) {
+        console.error("Error fetching custom settings:", err);
+        return null;
+    }
+}
+
+export async function updateCustomSettings(serverId, newSettings) {
+    let { name, color, animation, embed_search, embed_final } = newSettings;
+
+    if (!name || name.trim() === '') name = config.name;
+    if (!color || color.trim() === '') color = config.color;
+    if (!embed_search || embed_search.trim() === '') embed_search = config.embed_search;
+    if (!embed_final || embed_final.trim() === '') embed_final = config.embed_final;
+    
+    try {
+        await pool.query(
+            `INSERT INTO server_customs (server_id, name, color, animation, embed_search, embed_final)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (server_id)
+             DO UPDATE SET 
+                name = EXCLUDED.name,
+                color = EXCLUDED.color,
+                animation = EXCLUDED.animation,
+                embed_search = EXCLUDED.embed_search,
+                embed_final = EXCLUDED.embed_final`,
+            [serverId, name, color, animation, embed_search, embed_final]
+        );
+        console.log(`Updated custom settings for server ${serverId}`);
+    } catch (err) {
+        console.error("Error updating custom settings:", err);
+    }
+}
+
+export async function updateCountrySettings(serverId, countryCode) {
+    try {
+        
+        assureExistence(serverId);
+
+        const update = await pool.query(
+            'UPDATE servers SET country = $1 WHERE id = $2;',
             [countryCode, serverId]
         );
 
@@ -189,6 +265,8 @@ export async function updateCountrySettings(serverId, countryCode) {
  */
 export async function updatePlatformSetting(serverId, platformKey, isEnabled) {
     try {
+        assureExistence(serverId);
+
         // Get platform ID
         const { rows } = await pool.query(
             'SELECT id FROM platforms WHERE key_name = $1',
@@ -201,25 +279,23 @@ export async function updatePlatformSetting(serverId, platformKey, isEnabled) {
         const platformId = rows[0].id;
 
         if (isEnabled) {
-            // Insert enabled platform
             await pool.query(
                 `INSERT INTO server_platforms (server_id, platform_id, enabled)
                  VALUES ($1, $2, TRUE)
                  ON CONFLICT (server_id, platform_id) DO NOTHING`,
                 [serverId, platformId]
             );
-            console.log(`Enabled ${platformKey} for server ${serverId}`);
         } else {
-            // Remove disabled platform
             await pool.query(
                 `DELETE FROM server_platforms
                  WHERE server_id = $1 AND platform_id = $2`,
                 [serverId, platformId]
             );
-            console.log(`Disabled ${platformKey} for server ${serverId}`);
         }
-    } catch (err) {
-        console.error("Error updating platform setting:", err);
+
+        console.log(`${isEnabled ? "Enabled" : "Disabled"} ${platformKey} for server ${serverId}`);
+    } catch (error) {
+        console.error("Error updating platform setting:", error);
     }
 }
 

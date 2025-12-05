@@ -2,5 +2,11 @@
     "name": "Journey's Music",
     "color": "#d2afff",
     "image": "./frieren_search.png",
-    "animation": "./frieren_analysis.gif"
+    "animation": "./frieren_analysis.gif",
+    "presence_emoji": "<:frieren_heart_pink:1242819328194117775>",
+    "presence_idle_init":"Getting ready for the Journey",
+    "presence_idle_analyzing":"Analyzing music heard on the Journey",
+    "presence_online":"Being an innocent elf on a Journey",
+    "embed_search":"🎶Frieren hums the Music she hears🎶",
+    "embed_final":"✨Frieren has finished analyzing the song!✨"
 }

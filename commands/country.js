@@ -1,6 +1,6 @@
-import { ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ButtonStyle, ButtonBuilder, SlashCommandBuilder, ComponentType } from 'discord.js';
-import { getServerSettings, updateCountrySettings } from '../database.js';
-import COUNTRY_MAP from '../country_map.json' assert { type: 'json' };
+import { ActionRowBuilder, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, SlashCommandBuilder, ComponentType, MessageFlags } from 'discord.js';
+import { getPlatformSettings, updateCountrySettings, getCustomSettings } from '../database.js';
+import COUNTRY_MAP from '../country_map.json' assert  { type: 'json' };
 
 const ALPHABET_RANGES = [
     { label: 'AG - BJ', startCode: 'AG', endCode: 'BJ' },
@@ -58,9 +58,7 @@ function generateCountrySelect(rangeLabel) {
     return new ActionRowBuilder().addComponents(menu);
 }
 
-const generateCountryComponents = (currentCountryCode, color) => {
-    // Get the full name for the current country
-    const currentCountryName = COUNTRY_MAP.country_data[currentCountryCode] || 'UNKNOWN - Default DE';
+const generateCountryComponents = (currentCountryCode, currentCountryName, color) => {
 
     // 1. Create the Status Embed
     const statusEmbed = new EmbedBuilder()
@@ -89,17 +87,18 @@ export default {
         .setName('country')
         .setDescription('Configure the country/location your streaming platforms are restricted to.'),
 
-    async execute(interaction, config) {
+    async execute(interaction) {
         const serverId = interaction.guildId;
-        const color = config.color;
-        const serverSettings = await getServerSettings(serverId);
-        const countryCode = serverSettings.country || "??";
+        const serverCustoms = await getCustomSettings(serverId);
+        const serverPlatforms = await getPlatformSettings(serverId);
+        const color = serverCustoms.color;
+        const countryCode = serverPlatforms.country || "??";
         const countryName = COUNTRY_MAP.country_data[countryCode] || "??";
 
-        const componentPayload = generateCountryComponents(countryCode, color);
+        const componentPayload = generateCountryComponents(countryCode, countryName, color);
         const initialMessage = await interaction.reply({
-            ...componentPayload, // Spreads the { embeds, components } object
-            ephemeral: true,
+            ...componentPayload,
+            flags: MessageFlags.Ephemeral,
             fetchReply: true,
         });
 
@@ -128,7 +127,7 @@ export default {
 
                 await updateCountrySettings(serverId, selectedCountryCode);
 
-                const finalEmbed = generateCountryComponents(selectedCountryCode, color).embeds[0]
+                const finalEmbed = generateCountryComponents(selectedCountryCode, selectedCountryName, color).embeds[0]
                     .setDescription(`Country setting updated successfully!`);
 
                 await i.editReply({

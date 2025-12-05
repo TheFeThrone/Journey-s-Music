@@ -1,20 +1,21 @@
-import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } from 'discord.js';
-import { getServerSettings, updatePlatformSetting } from '../database.js';
+import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, MessageFlags } from 'discord.js';
+import { getPlatformSettings, updatePlatformSetting } from '../database.js';
 
 /**
  * A helper function to generate the embed and button components based on the current config.
  * This keeps the code DRY (Don't Repeat Yourself).
- * @param {object} config The current configuration object.
+ * @param {object} serverPlatforms The current platform configuration.
+ * @param {string} color The current custom color.
  * @returns {{embeds: EmbedBuilder[], components: ActionRowBuilder[]}}
  */
-const generateComponents = (serverSettings, color) => {
+const generateComponents = (serverPlatforms, color) => {
     const statusEmbed = new EmbedBuilder()
         .setColor(color)
         .setTitle('🛠 Config 🛠')
         .setDescription('Configure which platforms should be shown after analysis. Click a button below to toggle the status for that platform.')
         .setFooter({ text: 'Interaction ends in 5 minutes'});
 
-    const platformEntries = Object.entries(serverSettings);
+    const platformEntries = Object.entries(serverPlatforms);
     const platformListString = platformEntries
         .map(([key, platform]) => `${platform.enabled ? '✅' : '❌'} ${platform.name}`)
         .join('\n');
@@ -56,13 +57,14 @@ export default {
         .setName('platforms')
         .setDescription('Configure which platforms should be shown after analysis.'),
 
-    async execute(interaction, config) {
+    async execute(interaction) {
         const serverId = interaction.guildId;
-	let serverSettings = await getServerSettings(serverId);
+        let serverPlatforms = await getPlatformSettings(serverId);
+        let serverCustoms = await getPlatformSettings(serverId);
 
         const message = await interaction.reply({
-            ...generateComponents(serverSettings, config.color),
-            ephemeral: true,
+            ...generateComponents(serverPlatforms, serverCustoms.color),
+            flags: MessageFlags.Ephemeral,
             fetchReply: true,
         });
 
@@ -79,18 +81,18 @@ export default {
             }
 
             const platformKey = buttonInteraction.customId.split('_')[1];
-	    if (!serverSettings[platformKey]) return;
+	        if (!serverPlatforms[platformKey]) return;
 
-            const newEnabled = !serverSettings[platformKey].enabled;
+            const newEnabled = !serverPlatforms[platformKey].enabled;
 
             // Update the database
             await updatePlatformSetting(serverId, platformKey, newEnabled);
 
             // Update local state
-            serverSettings[platformKey].enabled = newEnabled;
+            serverPlatforms[platformKey].enabled = newEnabled;
 
             // Update the message
-            await buttonInteraction.update(generateComponents(serverSettings, config.color));
+            await buttonInteraction.update(generateComponents(serverPlatforms, serverCustoms.color));
 
         });
 
@@ -98,15 +100,15 @@ export default {
         collector.on('end', async () => {
             // Create a final, static embed showing the confirmed state.
             const finalEmbed = new EmbedBuilder()
-                .setColor(config.color)
+                .setColor(serverCustoms.color)
                 .setTitle('🛠 Config 🛠')
                 .setDescription('The following configs have been saved.');
 
-	    const platformListString = Object.values(serverSettings)
+	        const platformListString = Object.values(serverPlatforms)
                 .map(p => `${p.enabled ? '✅' : '❌'} ${p.name}`)
                 .join('\n');
 
-	    // Add the list as a single field to the embed.
+	        // Add the list as a single field to the embed.
             finalEmbed.addFields({ name: 'All Platforms', value: platformListString });
 
             // Edit the reply to show the final embed and remove all buttons.
