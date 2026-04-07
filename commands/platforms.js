@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, MessageFlags } from 'discord.js';
-import { getPlatformSettings, updatePlatformSetting } from '../database.js';
+import { getPlatformSettings, getCustomSettings, updatePlatformSetting } from '../database.js';
 
 /**
  * A helper function to generate the embed and button components based on the current config.
@@ -59,8 +59,9 @@ export default {
 
     async execute(interaction) {
         const serverId = interaction.guildId;
-        let serverPlatforms = await getPlatformSettings(serverId);
-        let serverCustoms = await getPlatformSettings(serverId);
+        const serverName = interaction.guild?.name;
+        let serverPlatforms = await getPlatformSettings(serverId, serverName);
+        let serverCustoms = await getCustomSettings(serverId, serverName);
 
         const message = await interaction.reply({
             ...generateComponents(serverPlatforms, serverCustoms.color),
@@ -86,7 +87,7 @@ export default {
             const newEnabled = !serverPlatforms[platformKey].enabled;
 
             // Update the database
-            await updatePlatformSetting(serverId, platformKey, newEnabled);
+            await updatePlatformSetting(serverId, serverName, platformKey, newEnabled);
 
             // Update local state
             serverPlatforms[platformKey].enabled = newEnabled;

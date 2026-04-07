@@ -1,5 +1,6 @@
 import { Client, GatewayIntentBits, Collection, MessageFlags } from 'discord.js';
-import config from './config.json' with { type: "json" };
+import config from './config.json' assert  { type: "json" };
+import { devLog } from './dev.js';
 import { analyzeMusic } from './messageHandlers/analyzeMusic.js';
 import platforms from './commands/platforms.js';
 import country from './commands/country.js';
@@ -10,17 +11,20 @@ import { initializeServerSettings, deleteServerSettings, createTables } from './
 import https from 'https';
 
 const HEALTHCHECK_URL = process.env.HEALTHCHECK_URL;
-function startHeartbeat(minutes){
+const DEV_SERVER = process.env.DEV_SERVER
+const DEV_CHANNEL = process.env.DEV_CHANNEL
+
+async function startHeartbeat(minutes){
     if (HEALTHCHECK_URL) {
         console.log("Healthcheck_URL found");
         // Ping every <minutes> minutes
-        setInterval(() => {
-            https.get(HEALTHCHECK_URL).on("error", (err) => {
-            console.error("Healthcheck ping failed:", err);
+        setInterval(async () => {
+            https.get(HEALTHCHECK_URL).on("error", async (err) => {
+            await devLog(client, err, "Healthcheck ping failed:");
           });
         }, minutes * 60 * 1000); // 10 minutes in milliseconds
 
-        https.get(HEALTHCHECK_URL).on("error", (err) => console.error("Healthcheck ping failed:", err));
+        await https.get(HEALTHCHECK_URL).on("error", (err) => console.error("Healthcheck ping failed:", err));
     } else {
         console.warn("No Healthcheck_URL found. Checking for heartbeat might be important");
     }
@@ -59,7 +63,7 @@ client.login(process.env.TOKEN).catch(err => {
 
 client.on('clientReady', async () => {
     await createTables();
-    startHeartbeat(10);
+    await startHeartbeat(10);
     let message = `Logged in as ${client.user.tag} in:\n`
     for (const guild of client.guilds.cache.values()) {
         await initializeServerSettings(guild.id, guild.name);
@@ -104,7 +108,7 @@ client.on('interactionCreate', async interaction => {
         try {
             await command.execute(interaction);
         } catch (error) {
-            console.error(error);
+            await devLog(client, error, "Command execution", interaction.guild.name);
             if (interaction.replied || interaction.deferred) {
                 await interaction.followUp({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
             } else {
@@ -124,6 +128,6 @@ client.on('interactionCreate', async interaction => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guildId) return;
     await changePresence(config.presence_idle_analyzing, "idle");
-    await analyzeMusic(message, message.guildId);
+    await analyzeMusic(client, message);
     await changePresence(config.presence_online, "online");
 });

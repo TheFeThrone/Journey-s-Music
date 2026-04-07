@@ -129,7 +129,6 @@ export async function initializeServerSettings(serverId, serverName) {
         }
 
         const nullSettings = {name: null, color: null, animation: null, embed_search: null, embed_final: null};
-        await updateCustomSettings(serverId, nullSettings);
 
         // Mark server as initialized
         await pool.query(
@@ -137,18 +136,20 @@ export async function initializeServerSettings(serverId, serverName) {
             [serverId]
         );
 
+        await updateCustomSettings(serverId, serverName, nullSettings);
+
         console.log(`Initialized settings for server: ${serverId}`);
     } catch (error) {
         console.error('Error initializing server settings:', error);
     }
 }
 
-async function assureExistence(serverId){
+async function assureExistence(serverId, serverName){
     const { rows: serverRows } = await pool.query(
         'SELECT initialized FROM servers WHERE id = $1',
         [serverId]
     );
-    if (!serverRows[0].initialized) {
+    if (serverRows.length === 0 || !serverRows[0].initialized) {
         await initializeServerSettings(serverId, serverName);
     }
 }
@@ -160,7 +161,7 @@ export async function getPlatformSettings(serverId, serverName) {
     try {
         const settings = {};
 
-        assureExistence(serverId);
+        await assureExistence(serverId, serverName);
 
         const { rows } = await pool.query(`
             SELECT p.key_name, p.name, p.prefix, p.default_enabled, sp.enabled
@@ -186,8 +187,11 @@ export async function getPlatformSettings(serverId, serverName) {
     }
 }
 
-export async function getCustomSettings(serverId) {
+export async function getCustomSettings(serverId, serverName) {
     try {
+        
+        await assureExistence(serverId, serverName);
+
         const { rows } = await pool.query(
             `SELECT name, color, animation, embed_search, embed_final
              FROM server_customs
@@ -213,7 +217,7 @@ export async function getCustomSettings(serverId) {
     }
 }
 
-export async function updateCustomSettings(serverId, newSettings) {
+export async function updateCustomSettings(serverId, serverName, newSettings) {
     let { name, color, animation, embed_search, embed_final } = newSettings;
 
     if (!name || name.trim() === '') name = config.name;
@@ -222,6 +226,9 @@ export async function updateCustomSettings(serverId, newSettings) {
     if (!embed_final || embed_final.trim() === '') embed_final = config.embed_final;
     
     try {
+
+        await assureExistence(serverId, serverName);
+
         await pool.query(
             `INSERT INTO server_customs (server_id, name, color, animation, embed_search, embed_final)
              VALUES ($1, $2, $3, $4, $5, $6)
@@ -240,12 +247,12 @@ export async function updateCustomSettings(serverId, newSettings) {
     }
 }
 
-export async function updateCountrySettings(serverId, countryCode) {
+export async function updateCountrySettings(serverId, serverName, countryCode) {
     try {
         
-        assureExistence(serverId);
+        await assureExistence(serverId, serverName);
 
-        const update = await pool.query(
+        const updateResult = await pool.query(
             'UPDATE servers SET country = $1 WHERE id = $2;',
             [countryCode, serverId]
         );
@@ -263,9 +270,9 @@ export async function updateCountrySettings(serverId, countryCode) {
 /**
  * Update a platform setting for a server
  */
-export async function updatePlatformSetting(serverId, platformKey, isEnabled) {
+export async function updatePlatformSetting(serverId, serverName, platformKey, isEnabled) {
     try {
-        assureExistence(serverId);
+        await assureExistence(serverId, serverName);
 
         // Get platform ID
         const { rows } = await pool.query(

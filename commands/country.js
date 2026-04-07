@@ -89,8 +89,9 @@ export default {
 
     async execute(interaction) {
         const serverId = interaction.guildId;
-        const serverCustoms = await getCustomSettings(serverId);
-        const serverPlatforms = await getPlatformSettings(serverId);
+        const serverName = interaction.guild?.name;
+        const serverCustoms = await getCustomSettings(serverId, serverName);
+        const serverPlatforms = await getPlatformSettings(serverId, serverName);
         const color = serverCustoms.color;
         const countryCode = serverPlatforms.country || "??";
         const countryName = COUNTRY_MAP.country_data[countryCode] || "??";
@@ -125,7 +126,7 @@ export default {
                 const selectedCountryCode = i.values[0];
                 const selectedCountryName = COUNTRY_MAP.country_data[selectedCountryCode];
 
-                await updateCountrySettings(serverId, selectedCountryCode);
+                await updateCountrySettings(serverId, serverName, selectedCountryCode);
 
                 const finalEmbed = generateCountryComponents(selectedCountryCode, selectedCountryName, color).embeds[0]
                     .setDescription(`Country setting updated successfully!`);

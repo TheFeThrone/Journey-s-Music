@@ -8,7 +8,8 @@ export default {
 
     async execute(interaction) {
         const serverId = interaction.guildId;
-        const currentCustoms = await getCustomSettings(serverId);
+        const serverName = interaction.guild?.name || null;
+        const currentCustoms = await getCustomSettings(serverId, serverName);
 
         const modal = new ModalBuilder()
             .setCustomId('customize_modal')
@@ -70,6 +71,7 @@ export default {
 };
 
 export async function handleCustomize(interaction){
+
     const fields = interaction.fields;
     const newSettings = {
         name: fields.getTextInputValue('name'),
@@ -79,7 +81,7 @@ export async function handleCustomize(interaction){
         embed_final: fields.getTextInputValue('embed_final')
     };
 
-    await updateCustomSettings(interaction.guildId, newSettings);
+    await updateCustomSettings(interaction.guildId, interaction?.guild.name, newSettings);
     await interaction.editReply("Bot Customized");
 
 }

@@ -2,103 +2,118 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentB
 import config from '../config.json' with { type: "json" };
 import fetch from 'node-fetch';
 import { getPlatformSettings, getCustomSettings } from '../database.js';
+import { devLog } from '../dev.js';
+import Odesli from 'odesli.js';
 
-export async function analyzeMusic(foundMessage, serverId) {
+const odesli = new Odesli({
+    version: 'v1-alpha.1',
+    cache: true,      // Automatically prevents 429 errors for repeat links
+    maxRetries: 3,    // Auto-retries if it fails
+    retryDelay: 1500,
+    headers: { 'User-Agent': 'JourneyMusicBot/1.0' },
+    validateParams: true
+});
+
+export async function analyzeMusic(client, foundMessage) {
     if (foundMessage.author.bot) return;
+    const serverId = foundMessage.guildId;
+    const serverName = client.guilds.cache.get(serverId)?.name || null;
+    const serverPlatforms = await getPlatformSettings(serverId, serverName);
 
-    const serverPlatforms = await getPlatformSettings(serverId);
-    const serverCustoms = await getCustomSettings(serverId);
-
-    // Check if the message contains a link from the config file
-    const isMusicLink = Object.keys(serverPlatforms).some(
-        platformKey => serverPlatforms[platformKey].enabled && foundMessage.content.includes(serverPlatforms[platformKey].prefix)
+    const link = foundMessage.content.split(/\s+/).find(word =>
+        Object.values(serverPlatforms).some(
+            platform => platform.enabled &&
+            word.includes(platform.prefix))
     );
-    if (!isMusicLink) return;
+    if (!link) return;
 
     try {
-        // Find the first valid link in the message content
-        const link = foundMessage.content.split(/\s+/).find(word =>
-            Object.keys(serverPlatforms).some(
-                platformKey => word.includes(serverPlatforms[platformKey].prefix)
-            )
-        );
-        if (!link) return;
-
-        // Vars for platforms with already embedded audio
-        const hasSpotifyLink = link.includes(serverPlatforms.spotify.prefix);
-        const hasYouTubeLink = link.includes(serverPlatforms.youtube.prefix);
-        const hasAppleMusicLink = link.includes(serverPlatforms.appleMusic.prefix);
-        const hasAmazonMusicLink = link.includes(serverPlatforms.amazonMusic.prefix);
-        const hasSoundCloudLink = link.includes(serverPlatforms.soundcloud.prefix);
-        const hasEmbed = (hasSpotifyLink || hasYouTubeLink || hasAppleMusicLink || hasAmazonMusicLink || hasSoundCloudLink);
-
-        // TODO: tidal specific api call with https://tidal.com/smart-links/${tidal-path-without-?u}
-        // const hasTidalLink = link.includes(serverPlatforms.tidal.prefix);
-
-        // Call the music matching API (e.g., Odesli/Songlink)
-        const apiResponse = await fetch(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(link)}&userCountry=${serverPlatforms.country}`);
-        const data = await apiResponse.json();
-
-        if (data && data.linksByPlatform) {
-            const platforms = data.linksByPlatform;
-            const allButtons = [];
-
-            const allAreYouTube = Object.keys(platforms).every(key => key.toLowerCase().includes('youtube'));
-            if (hasYouTubeLink && allAreYouTube) {
-                return;
+        let songData;
+        try {
+            songData = await odesli.fetch(link, {
+                country: serverPlatforms.country
+            });
+            if (songData.error) {
+                throw new Error(songData.error);
             }
-            const embeddedLink = platforms.soundcloud ? platforms.soundcloud.url :
-                               platforms.youtube ? platforms.youtube.url :
-                               platforms.spotify ? platforms.spotify.url :
-                               platforms.appleMusic ? platforms.appleMusic.url :
-                               platforms.amazonMusic ? platforms.amazonMusic.url : false;
-
-            await foundMessage.suppressEmbeds(true);
-            if (embeddedLink) {
-                const embed = new EmbedBuilder()
-                    .setColor(serverCustoms.color)
-                    .setTitle(serverCustoms.embed_search)
-                await foundMessage.channel.send({ embeds: [embed], flags: 4096 });
-                await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: 4096 });
-            }
-
-            const firstEntityKey = Object.keys(data.entitiesByUniqueId)[0];
-            const entity = data.entitiesByUniqueId[firstEntityKey];
-            const title = entity ? entity.title : 'Unknown Title';
-            const artist = entity ? entity.artistName : 'Unknown Artist';
-
-            // Build a list of links for other platforms based on your config file keys
-            // Create buttons for other platforms from your config file
-            for (const platformKey of Object.keys(serverPlatforms)) {
-                if (platforms[platformKey] && serverPlatforms[platformKey].enabled) {
-                    allButtons.push(
-                        new ButtonBuilder()
-                        .setLabel(serverPlatforms[platformKey].name)
-                        .setStyle(ButtonStyle.Link)
-                        .setURL(platforms[platformKey].url)
-                    );
-                }
-            }
-
-            if (allButtons.length > 0) {
-                const actionRows = [];
-                // Batch buttons into rows of up to 5
-                for (let i = 0; i < allButtons.length; i += 5) {
-                    const row = new ActionRowBuilder().addComponents(allButtons.slice(i, i + 5));
-                    actionRows.push(row);
-                }
-
-                const attachment = !serverCustoms.animation ? new AttachmentBuilder(config.animation) : null;
-                const thumbnailUrl = serverCustoms.animation ? serverCustoms.animation : `attachment://${config.animation}`;
-                const embed = new EmbedBuilder()
-                    .setColor(serverCustoms.color)
-                    .setTitle(serverCustoms.embed_final)
-                    .setDescription(`${title} - ${artist}`)
-                    .setThumbnail(thumbnailUrl)
-                await foundMessage.channel.send({ embeds: [embed], components: actionRows, files: [attachment], flags: 4096 });
-            }
+        } catch (error) {
+            await devLog(client, error, "Odesli Library Fetch", serverName);
+            return;
         }
+        if (!songData?.linksByPlatform) return;
+        const platforms = songData.linksByPlatform;
+
+        // Prevent duplicate YouTube embeds
+        const isOriginalLinkYouTube = link.includes(serverPlatforms.youtube?.prefix)
+        const allAreYouTube = Object.keys(platforms).every(
+            key => key.toLowerCase().includes('youtube'));
+        if (isOriginalLinkYouTube && allAreYouTube) return;
+
+        // Find the first ethically available embedded audio link
+        const embeddedLink = platforms.soundcloud?.url 
+            || platforms.youtube?.url 
+            || platforms.spotify?.url 
+            || platforms.appleMusic?.url 
+            || platforms.amazonMusic?.url 
+            || false;
+
+        const serverCustoms = await getCustomSettings(serverId, serverName);
+        await foundMessage.suppressEmbeds(true);
+
+        // Send Search Embed and hidden link to embed audio visualizer
+        if (embeddedLink) {
+            const searchEmbed = new EmbedBuilder()
+                .setColor(serverCustoms.color)
+                .setTitle(serverCustoms.embed_search)
+            await foundMessage.channel.send({ embeds: [searchEmbed], flags: 4096 });
+            await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: 4096 });
+        }
+
+        // Extract Song Info
+        const entity = Object.values(songData.entitiesByUniqueId)[0];
+        const title = entity ? entity.title : 'Unknown Title';
+        const artist = entity ? entity.artistName : 'Unknown Artist';
+
+        // Create buttons for other platforms from server config
+        const allButtons = Object.keys(serverPlatforms)
+            .filter( platformKey => 
+                platforms[platformKey] &&
+                serverPlatforms[platformKey].enabled
+            )
+            .map( key =>
+                new ButtonBuilder()
+                    .setLabel(serverPlatforms[key].name)
+                    .setStyle(ButtonStyle.Link)
+                    .setURL(platforms[key].url)
+            );
+        if (allButtons.length === 0) return;
+
+        // Batch buttons into rows of up to 5
+        const actionRows = [];
+        for (let i = 0; i < allButtons.length; i += 5) {
+            actionRows.push(
+                new ActionRowBuilder().addComponents(allButtons.slice(i, i + 5))
+            );
+        }
+
+        // Build and Send the Final Embed
+        const attachment = !serverCustoms.animation ? new AttachmentBuilder(config.animation) : null;
+        const thumbnailUrl = serverCustoms.animation ? serverCustoms.animation : `attachment://${config.animation}`;
+
+        const finalEmbed = new EmbedBuilder()
+            .setColor(serverCustoms.color)
+            .setTitle(serverCustoms.embed_final)
+            .setDescription(`${title} - ${artist}`)
+            .setThumbnail(thumbnailUrl)
+
+        await foundMessage.channel.send({
+            embeds: [finalEmbed],
+            components: actionRows,
+            files: [attachment].filter(Boolean),
+            flags: 4096
+        });
+
     } catch (error) {
-        console.error('Error:', error);
+        await devLog(client, error, "Work on Link", serverName);
     }
 }
