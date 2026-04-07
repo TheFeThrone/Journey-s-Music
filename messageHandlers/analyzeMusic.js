@@ -14,6 +14,108 @@ const odesli = new Odesli({
     validateParams: true
 });
 
+function tidalSmartApi(link) {
+    // get everything after tidal.com/
+    const afterDomain = link.split('tidal.com/')[1];
+    const paths = afterDomain
+        .replace('browse/', '')
+        .split('/')
+        .filter(part => part !== 'u' && part !== '');
+    const fullPaths = paths.join('-');
+
+    return `https://tidal.com/smart-links/${fullPaths}`;
+}
+
+async function tidalAPIfetch(link) {
+    const apiUrl = tidalSmartApi(link);
+    if (!apiUrl) return { error: "Invalid Tidal link structure" };
+
+    const response = await fetch(apiUrl, {
+        headers: { 'User-Agent': 'JourneyMusicBot/1.0' }
+    });
+    if (!response.ok) {
+        return { error: `Tidal API responded with status ${response.status}` };
+    }
+    const data = await response.json();
+    return data;
+}
+
+function translateTidalToOdesli(tidalData, originalLink, country) {
+    const statusMatch = tidalData.statusMessage?.match(/(track|album|artist)-(\d+)/);
+    const sourceId = statusMatch ? statusMatch[2] : 'unknown';
+    const sourceType = statusMatch ? (statusMatch[1] === 'album' ? 'album' : 'song') : 'song';
+
+    const mainEntityUniqueId = `TIDAL_${sourceType.toUpperCase()}::${sourceId}`;
+
+    const entitiesByUniqueId = {
+        [mainEntityUniqueId]: {
+            id: sourceId,
+            type: sourceType,
+            title: 'Unknown Title',
+            artistName: 'Unknown Artist',
+            apiProvider: 'tidal',
+            platforms: ['tidal']
+        }
+    };
+
+    const linksByPlatform = {
+        tidal: {
+            url: originalLink,
+            entityUniqueId: mainEntityUniqueId
+        }
+    };
+
+    const platformMap = {
+        'spotify': 'spotify',
+        'apple': 'appleMusic',
+        'youtubemusic': 'youtubeMusic',
+        'amazon': 'amazonMusic',
+        'youtube': 'youtube',
+        'soundcloud': 'soundcloud',
+        'deezer': 'deezer',
+        'pandora': 'pandora',
+        'napster': 'napster',
+        'yandex': 'yandex'
+    };
+
+    if (tidalData.links) {
+        tidalData.links.forEach(platformData => {
+            const odesliKey = platformMap[platformData.storeId];
+            if (!odesliKey) return; 
+
+            let finalUrl = platformData.url;
+
+            if (platformData.territories && platformData.territories.length > 0) {
+                const targetCountry = platformData.territories.find(t => t.countryCode.toUpperCase() === country.toUpperCase());
+                const usCountry = platformData.territories.find(t => t.countryCode.toUpperCase() === 'US');
+                
+                if (targetCountry && targetCountry.webUrl) {
+                    finalUrl = targetCountry.webUrl;
+                } else if (usCountry && usCountry.webUrl) {
+                    finalUrl = usCountry.webUrl;
+                }
+            }
+
+            const linkedEntityId = `${odesliKey.toUpperCase()}_${sourceType.toUpperCase()}::unknown`;
+
+            linksByPlatform[odesliKey] = {
+                url: platformData.url,
+                entityUniqueId: linkedEntityId
+            };
+
+            entitiesByUniqueId[mainEntityUniqueId].platforms.push(odesliKey);
+        });
+    }
+
+    return {
+        entityUniqueId: mainEntityUniqueId,
+        userCountry: country,
+        pageUrl: originalLink,
+        entitiesByUniqueId,
+        linksByPlatform
+    };
+}
+
 export async function analyzeMusic(client, foundMessage) {
     if (foundMessage.author.bot) return;
     const serverId = foundMessage.guildId;
@@ -28,18 +130,49 @@ export async function analyzeMusic(client, foundMessage) {
     if (!link) return;
 
     try {
-        let songData;
+        let odesliData = null;
+        let tidalTranslatedData = null;
+        let songData = null;
+
+        // Fetch from Odesli
         try {
-            songData = await odesli.fetch(link, {
-                country: serverPlatforms.country
-            });
-            if (songData.error) {
-                throw new Error(songData.error);
-            }
-        } catch (error) {
-            await devLog(client, error, "Odesli Library Fetch", serverName);
-            return;
+            const res = await odesli.fetch(link, { country: serverPlatforms.country });
+            if (!res.error) odesliData = res;
+        } catch (e) {}
+
+        // Fetch from Tidal (if original is Tidal, OR if Odesli found a Tidal link)
+        let tidalUrl = link.includes('tidal.com') ? link : odesliData?.linksByPlatform?.tidal?.url;
+        if (tidalUrl) {
+            try {
+                const rawTidal = await tidalAPIfetch(tidalUrl);
+                if (!rawTidal.error) {
+                    tidalTranslatedData = translateTidalToOdesli(rawTidal, tidalUrl, serverPlatforms.country);
+                }
+            } catch (e) {}
         }
+
+        // Merge the Results
+        if (odesliData && tidalTranslatedData) {
+            songData = odesliData;
+            
+            for (const [platform, linkInfo] of Object.entries(tidalTranslatedData.linksByPlatform)) {
+                if (!songData.linksByPlatform[platform]) {
+                    songData.linksByPlatform[platform] = linkInfo;
+                    
+                    const entityId = linkInfo.entityUniqueId;
+                    if (tidalTranslatedData.entitiesByUniqueId[entityId]) {
+                        songData.entitiesByUniqueId[entityId] = tidalTranslatedData.entitiesByUniqueId[entityId];
+                    }
+                }
+            }
+        } else if (odesliData) {
+            songData = odesliData;
+        } else if (tidalTranslatedData) {
+            songData = tidalTranslatedData;
+        } else {
+            throw new Error("Both Odesli and Tidal API fetches failed or returned empty data.");
+        }
+
         if (!songData?.linksByPlatform) return;
         const platforms = songData.linksByPlatform;
 
