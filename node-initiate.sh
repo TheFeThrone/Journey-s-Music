@@ -17,10 +17,11 @@ fi
 # Dependency check
 INSTALL=false
 
-if [ ! -d node_modules ]; then
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] node_modules missing — will install"
+if [ ! -d node_modules ] || [ ! -f package-lock.json ]; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] node_modules or package-lock missing — will install"
   INSTALL=true
-elif [ -f package-lock.json ]; then
+else
+  # If both exist, check for changes
   NEW_SUM=$(sha256sum package-lock.json | awk '{print $1}')
   OLD_SUM=$(cat .lockhash 2>/dev/null)
 
@@ -34,11 +35,11 @@ if [ "$INSTALL" = true ]; then
   if [ -f package-lock.json ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing dependencies with npm ci"
     npm ci --omit=dev
-    sha256sum package-lock.json | awk '{print $1}' > .lockhash
   else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Installing dependencies with npm install"
     npm install --omit=dev
   fi
+  [ -f package-lock.json ] && sha256sum package-lock.json | awk '{print $1}' > .lockhash
 else
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] Dependencies unchanged — skipping install"
 fi
