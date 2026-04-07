@@ -127,6 +127,7 @@ export async function analyzeMusic(client, foundMessage) {
             word.includes(platform.prefix))
     );
     if (!link) return;
+    const cleanLink = link.split("?")[0]; // remove sharing parameters etc
 
     try {
         let odesliData = null;
@@ -135,14 +136,14 @@ export async function analyzeMusic(client, foundMessage) {
 
         // Fetch from Odesli
         try {
-            const res = await odesli.fetch(link, { country: serverPlatforms.country });
+            const res = await odesli.fetch(cleanLink, { country: serverPlatforms.country });
             if (!res.error) odesliData = res;
         } catch (e) {
             await devLog(client, e, "Odesli Fetch", serverName);
         }
 
         // Fetch from Tidal (if original is Tidal, OR if Odesli found a Tidal link)
-        let tidalUrl = link.includes('tidal.com') ? link : odesliData?.linksByPlatform?.tidal?.url;
+        let tidalUrl = cleanLink.includes('tidal.com') ? cleanLink : odesliData?.linksByPlatform?.tidal?.url;
         if (tidalUrl) {
             try {
                 const rawTidal = await tidalAPIfetch(tidalUrl);
@@ -180,7 +181,7 @@ export async function analyzeMusic(client, foundMessage) {
         const platforms = songData.linksByPlatform;
 
         // Prevent duplicate YouTube embeds
-        const isOriginalLinkYouTube = link.includes(serverPlatforms.youtube?.prefix)
+        const isOriginalLinkYouTube = cleanLink.includes(serverPlatforms.youtube?.prefix)
         const allAreYouTube = Object.keys(platforms).every(
             key => key.toLowerCase().includes('youtube'));
         if (isOriginalLinkYouTube && allAreYouTube) return;
