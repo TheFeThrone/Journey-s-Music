@@ -98,7 +98,7 @@ function translateTidalToOdesli(tidalData, originalLink, country) {
             const linkedEntityId = `${odesliKey.toUpperCase()}_${sourceType.toUpperCase()}::unknown`;
 
             linksByPlatform[odesliKey] = {
-                url: platformData.url,
+                url: finalUrl,
                 entityUniqueId: linkedEntityId
             };
 
@@ -139,7 +139,7 @@ export async function analyzeMusic(client, foundMessage) {
             const res = await odesli.fetch(cleanLink, { country: serverPlatforms.country });
             if (!res.error) odesliData = res;
         } catch (e) {
-            await devLog(client, e, "Odesli Fetch", serverName);
+            await devLog(client, e, `Odesli Fetch URL: ${cleanLink}`, serverName);
         }
 
         // Fetch from Tidal (if original is Tidal, OR if Odesli found a Tidal link)
@@ -215,6 +215,7 @@ export async function analyzeMusic(client, foundMessage) {
         const allButtons = Object.keys(serverPlatforms)
             .filter( platformKey => 
                 platforms[platformKey] &&
+                platforms[platformKey].url &&
                 serverPlatforms[platformKey].enabled
             )
             .map( key =>
