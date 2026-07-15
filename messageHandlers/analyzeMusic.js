@@ -14,6 +14,77 @@ const odesli = new Odesli({
     validateParams: true
 });
 
+async function fetchOdesli(url, country, client, serverName) {
+    try {
+        const res = await odesli.fetch(url, { country: country });
+        if (!res.error) return res;
+    } catch (e) {
+        await devLog(client, e, `Odesli Fetch URL: ${url}`, serverName);
+    }
+
+    return null;
+}
+
+function mergeOdesli(base, extra) {
+
+    if (!base) return extra;
+    if (!extra || !extra?.linksByPlatform) return base;
+
+    base.entitiesByUniqueId ??= {};
+    base.linksByPlatform ??= {};
+
+    for (const [id, entity] of Object.entries(extra.entitiesByUniqueId ?? {})) {
+        const existing = base.entitiesByUniqueId?.[id];
+
+        if (!existing) {
+            base.entitiesByUniqueId[id] = entity;
+            continue;
+        }
+
+        if (
+            existing.title === "Unknown Title" &&
+            entity.title !== "Unknown Title"
+        ) {
+            existing.title = entity.title;
+        }
+        if (
+            existing.artistName === "Unknown Artist" &&
+            entity.artistName !== "Unknown Artist"
+        ) {
+            existing.artistName = entity.artistName;
+        }
+    }
+
+    for (const [platform, linkInfo] of Object.entries(extra.linksByPlatform)) {
+        if (!base.linksByPlatform[platform]) {
+            base.linksByPlatform[platform] = linkInfo;
+
+            const entityId = linkInfo.entityUniqueId;
+
+            if (extra.entitiesByUniqueId?.[entityId]) {
+                base.entitiesByUniqueId[entityId] =
+                    extra.entitiesByUniqueId[entityId];
+            }
+        }
+    }
+    
+    return base;
+
+}
+
+async function fetchTidal(url, country, client, serverName){
+    try {
+        const rawTidal = await tidalAPIfetch(url);
+        if (!rawTidal.error) {
+            return translateTidalToOdesli(rawTidal, url, country);
+        }
+    } catch (e) {
+        await devLog(client, e, "Tidal Fetch", serverName);
+    }
+
+    return null;
+}
+
 function tidalSmartApi(link) {
     // get everything after tidal.com/
     const afterDomain = link.split('tidal.com/')[1];
@@ -95,14 +166,11 @@ function translateTidalToOdesli(tidalData, originalLink, country) {
                 }
             }
 
-            const linkedEntityId = `${odesliKey.toUpperCase()}_${sourceType.toUpperCase()}::unknown`;
-
             linksByPlatform[odesliKey] = {
                 url: finalUrl,
-                entityUniqueId: linkedEntityId
+                entityUniqueId: mainEntityUniqueId
             };
 
-            entitiesByUniqueId[mainEntityUniqueId].platforms.push(odesliKey);
         });
     }
 
@@ -120,6 +188,7 @@ export async function analyzeMusic(client, foundMessage) {
     const serverId = foundMessage.guildId;
     const serverName = client.guilds.cache.get(serverId)?.name || null;
     const serverPlatforms = await getPlatformSettings(serverId, serverName);
+    const checkedUrls = new Set();
 
     const link = foundMessage.content.split(/\s+/).find(word =>
         Object.values(serverPlatforms).some(
@@ -130,51 +199,43 @@ export async function analyzeMusic(client, foundMessage) {
     const cleanLink = link.split("?")[0]; // remove sharing parameters etc
 
     try {
-        let odesliData = null;
         let tidalTranslatedData = null;
         let songData = null;
 
+
         // Fetch from Odesli
-        try {
-            const res = await odesli.fetch(cleanLink, { country: serverPlatforms.country });
-            if (!res.error) odesliData = res;
-        } catch (e) {
-            await devLog(client, e, `Odesli Fetch URL: ${cleanLink}`, serverName);
+        songData = await fetchOdesli(cleanLink, serverPlatforms.country, client, serverName);
+        if (songData) {
+            checkedUrls.add(cleanLink);
         }
 
         // Fetch from Tidal (if original is Tidal, OR if Odesli found a Tidal link)
-        let tidalUrl = cleanLink.includes('tidal.com') ? cleanLink : odesliData?.linksByPlatform?.tidal?.url;
+        let tidalUrl = cleanLink.includes('tidal.com') ? cleanLink : songData?.linksByPlatform?.tidal?.url;
         if (tidalUrl) {
-            try {
-                const rawTidal = await tidalAPIfetch(tidalUrl);
-                if (!rawTidal.error) {
-                    tidalTranslatedData = translateTidalToOdesli(rawTidal, tidalUrl, serverPlatforms.country);
-                }
-            } catch (e) {
-                await devLog(client, e, "Tidal Fetch", serverName);
-            }
+            tidalTranslatedData  = await fetchTidal(tidalUrl, serverPlatforms.country, client, serverName);
         }
 
-        // Merge the Results
-        if (odesliData && tidalTranslatedData) {
-            songData = odesliData;
-
-            for (const [platform, linkInfo] of Object.entries(tidalTranslatedData.linksByPlatform)) {
-                if (!songData.linksByPlatform[platform]) {
-                    songData.linksByPlatform[platform] = linkInfo;
-
-                    const entityId = linkInfo.entityUniqueId;
-                    if (tidalTranslatedData.entitiesByUniqueId[entityId]) {
-                        songData.entitiesByUniqueId[entityId] = tidalTranslatedData.entitiesByUniqueId[entityId];
-                    }
-                }
+        // 
+        if ( tidalTranslatedData ) {
+            if (!songData) {
+                songData = tidalTranslatedData;
+            } else {
+                songData = mergeOdesli(songData, tidalTranslatedData);
             }
-        } else if (odesliData) {
-            songData = odesliData;
-        } else if (tidalTranslatedData) {
-            songData = tidalTranslatedData;
-        } else {
-            throw new Error("Both Odesli and Tidal API fetches failed or returned empty data.");
+
+            for (const platform of Object.values(tidalTranslatedData.linksByPlatform)) {
+                if (!platform.url || platform.url.includes("tidal.com")) {
+                    continue;
+                }
+                if (checkedUrls.has(platform.url)) {
+                    continue;
+                }
+
+                const extraOdesli = await fetchOdesli(platform.url, serverPlatforms.country, client, serverName);
+                checkedUrls.add(platform.url);
+
+                songData = mergeOdesli(songData, extraOdesli);
+            }
         }
 
         if (!songData?.linksByPlatform) return;
@@ -207,7 +268,11 @@ export async function analyzeMusic(client, foundMessage) {
         }
 
         // Extract Song Info
-        const entity = Object.values(songData.entitiesByUniqueId)[0];
+        const entities = Object.values(songData.entitiesByUniqueId ?? {});
+        const entity = entities.find(
+            e => e.title !== "Unknown Title"
+        ) ?? entities[0];
+
         const title = entity ? entity.title : 'Unknown Title';
         const artist = entity ? entity.artistName : 'Unknown Artist';
 
