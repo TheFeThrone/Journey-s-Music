@@ -1,4 +1,4 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, MessageFlags } from 'discord.js';
 import config from '../config.json' with { type: "json" };
 import fetch from 'node-fetch';
 import { getPlatformSettings, getCustomSettings } from '../database.js';
@@ -183,6 +183,33 @@ function translateTidalToOdesli(tidalData, originalLink, country) {
     };
 }
 
+const keepParameters = {
+    spotify: [],
+    tidal: [],
+    amazonMusic: [],
+    youtubeMusic: ['v'],
+    youtube: ['v', 'list'],
+    appleMusic: ['i'],
+    deezer: [],
+    soundcloud: [],
+    anghami: [],
+    audiomack: [],
+    pandora: [],
+    yandex: [],
+};
+
+function matchesPlatform(hostname, prefix) {
+    return hostname === prefix || hostname.startsWith(`${prefix}.`) || hostname.endsWith(`.${prefix}`);
+}
+
+function tryParseUrl(link) {
+    try {
+        return new URL(/^https?:\/\//i.test(link) ? link : `https://${link}`);
+    } catch {
+        return null;
+    }
+}
+
 export async function analyzeMusic(client, foundMessage) {
     if (foundMessage.author.bot) return;
     const serverId = foundMessage.guildId;
@@ -190,13 +217,34 @@ export async function analyzeMusic(client, foundMessage) {
     const serverPlatforms = await getPlatformSettings(serverId, serverName);
     const checkedUrls = new Set();
 
-    const link = foundMessage.content.split(/\s+/).find(word =>
-        Object.values(serverPlatforms).some(
-            platform => platform.enabled &&
-            word.includes(platform.prefix))
+    const link = foundMessage.content.split(/\s+/).map(word =>  word.replace(/^<|>$/g, '').replace(/[.,!?)]*$/, ''))
+        .find(word => {
+            const url = tryParseUrl(word);
+            return url && Object.values(serverPlatforms).some(
+                platform =>
+                    platform.enabled &&
+                    matchesPlatform(url.hostname, platform.prefix)
+            );
+        }
     );
     if (!link) return;
-    const cleanLink = link.split("?")[0]; // remove sharing parameters etc
+
+    const url = tryParseUrl(link);
+    if (!url) return;
+
+    const platform = Object.values(serverPlatforms).find(
+        platform => platform.enabled &&
+        matchesPlatform(url.hostname, platform.prefix)
+    );    
+
+    const keep = keepParameters[platform?.key] ?? [];
+    for (const param of [...url.searchParams.keys()]) {
+        if (!keep.includes(param)) {
+            url.searchParams.delete(param);
+        }
+    }
+
+    const cleanLink = url.toString();
 
     try {
         let tidalTranslatedData = null;
@@ -242,7 +290,7 @@ export async function analyzeMusic(client, foundMessage) {
         const platforms = songData.linksByPlatform;
 
         // Prevent duplicate YouTube embeds
-        const isOriginalLinkYouTube = cleanLink.includes(serverPlatforms.youtube?.prefix)
+        const isOriginalLinkYouTube = platform?.key === 'youtube' || platform?.key === 'youtubeMusic'
         const allAreYouTube = Object.keys(platforms).every(
             key => key.toLowerCase().includes('youtube'));
         if (isOriginalLinkYouTube && allAreYouTube) return;
@@ -263,8 +311,8 @@ export async function analyzeMusic(client, foundMessage) {
             const searchEmbed = new EmbedBuilder()
                 .setColor(serverCustoms.color)
                 .setTitle(serverCustoms.embed_search)
-            await foundMessage.channel.send({ embeds: [searchEmbed], flags: 4096 });
-            await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: 4096 });
+            await foundMessage.channel.send({ embeds: [searchEmbed], flags: MessageFlags.SuppressNotifications });
+            await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: MessageFlags.SuppressNotifications });
         }
 
         // Extract Song Info
@@ -313,7 +361,7 @@ export async function analyzeMusic(client, foundMessage) {
             embeds: [finalEmbed],
             components: actionRows,
             files: [attachment].filter(Boolean),
-            flags: 4096
+            flags: MessageFlags.SuppressNotifications
         });
 
     } catch (error) {
