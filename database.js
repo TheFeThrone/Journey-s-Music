@@ -10,15 +10,18 @@ const pool = new Pool({
     password: process.env.DB_PASSWORD,
     port: process.env.DB_PORT,
 });
+pool.on('error', (err, client) => {
+    console.error('Unexpected error on idle database client:', err.message);
+});
 
 // api source https://linktree.notion.site/API-d0ebe08a5e304a55928405eb682f6741
 // could need: napster, spinrilla, audius, boomplay, bandcamp
 const VALID_PLATFORMS = [
-    { key: 'spotify', name: 'Spotify', prefix: 'open.spotify', default_enabled: true },
+    { key: 'spotify', name: 'Spotify', prefix: 'open.spotify.com', default_enabled: true },
     { key: 'tidal', name: 'Tidal', prefix: 'tidal.com', default_enabled: true },
     { key: 'amazonMusic', name: 'Amazon Music', prefix: 'music.amazon', default_enabled: true },
-    { key: 'youtubeMusic', name: 'YouTube Music', prefix: 'music.youtube', default_enabled: true },
-    { key: 'youtube', name: 'YouTube', prefix: 'www.youtu', default_enabled: true },
+    { key: 'youtubeMusic', name: 'YouTube Music', prefix: 'music.youtube.com', default_enabled: true },
+    { key: 'youtube', name: 'YouTube', prefix: 'youtu', default_enabled: true },
     { key: 'appleMusic', name: 'Apple Music', prefix: 'music.apple', default_enabled: true },
     { key: 'deezer', name: 'Deezer', prefix: 'deezer.com', default_enabled: true },
     { key: 'soundcloud', name: 'SoundCloud', prefix: 'soundcloud.com', default_enabled: false },
@@ -163,6 +166,12 @@ export async function getPlatformSettings(serverId, serverName) {
 
         await assureExistence(serverId, serverName);
 
+        const { rows: serverRows } = await pool.query(
+            'SELECT country FROM servers WHERE id = $1',
+            [serverId]
+        );
+        settings.country = serverRows[0]?.country || 'US';
+
         const { rows } = await pool.query(`
             SELECT p.key_name, p.name, p.prefix, p.default_enabled, sp.enabled
             FROM platforms p
@@ -173,6 +182,7 @@ export async function getPlatformSettings(serverId, serverName) {
         // Transform rows into key -> { name, prefix, default, enabled }
         for (const r of rows) {
             settings[r.key_name] = {
+                key: r.key_name,
                 name: r.name,
                 prefix: r.prefix,
                 default: r.default_enabled,

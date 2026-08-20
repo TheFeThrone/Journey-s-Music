@@ -25,6 +25,70 @@ async function fetchOdesli(url, country, client, serverName) {
     return null;
 }
 
+async function fetchSongLink(url, country, client, serverName) {
+    try {
+        const targetCountry = country || 'US';
+
+        const response = await fetch(`https://song.link/${encodeURIComponent(url)}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': `${country},en;q=0.9`
+            }
+        });
+
+        if (!response.ok) return null;
+
+        const html = await response.text();
+        const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+        if (!nextDataMatch) return null;
+
+        const nextData = JSON.parse(nextDataMatch[1]);
+        const pageData = nextData?.props?.pageProps?.pageData;
+        if (!pageData) return null;
+
+        const entity = pageData.entityData || {};
+        const entityUniqueId = pageData.entityUniqueId || `${entity.provider || 'unknown'}|${entity.type || 'song'}|${entity.id || 'unknown'}`;
+
+        const linksByPlatform = {};
+        for (const section of pageData.sections || []) {
+            if (!section.links) continue;
+            for (const linkItem of section.links) {
+                if (linkItem.url && linkItem.platform) {
+                    linksByPlatform[linkItem.platform] = {
+                        url: linkItem.url,
+                        entityUniqueId: linkItem.uniqueId || entityUniqueId,
+                        nativeAppUriDesktop: linkItem.nativeAppUriDesktop,
+                        nativeAppUriMobile: linkItem.nativeAppUriMobile
+                    };
+                }
+            }
+        }
+
+        return {
+            entityUniqueId,
+            userCountry: country || 'US',
+            pageUrl: pageData.pageUrl || `https://song.link/${url}`,
+            entitiesByUniqueId: {
+                [entityUniqueId]: {
+                    id: entity.id || 'unknown',
+                    type: entity.type || 'song',
+                    title: entity.title || 'Unknown Title',
+                    artistName: entity.artistName || 'Unknown Artist',
+                    thumbnailUrl: entity.thumbnailUrl || null,
+                    thumbnailWidth: entity.thumbnailWidth || null,
+                    thumbnailHeight: entity.thumbnailHeight || null,
+                    apiProvider: entity.provider || 'unknown',
+                    platforms: Object.keys(linksByPlatform)
+                }
+            },
+            linksByPlatform
+        };
+    } catch (e) {
+        await devLog(client, e, `Songlink HTML Scrape URL: ${url}`, serverName);
+        return null;
+    }
+}
+
 function mergeOdesli(base, extra) {
 
     if (!base) return extra;
@@ -199,8 +263,10 @@ const keepParameters = {
 };
 
 function matchesPlatform(hostname, prefix) {
-    return hostname === prefix || hostname.startsWith(`${prefix}.`) || hostname.endsWith(`.${prefix}`);
-}
+    if (prefix === "youtu") {
+        return hostname.includes(prefix);
+    }
+    return hostname === prefix || hostname.startsWith(`${prefix}`) || hostname.startsWith(`play.${prefix}`) || hostname.endsWith(`${prefix}`);}
 
 function tryParseUrl(link) {
     try {
@@ -212,6 +278,7 @@ function tryParseUrl(link) {
 
 export async function analyzeMusic(client, foundMessage) {
     if (foundMessage.author.bot) return;
+
     const serverId = foundMessage.guildId;
     const serverName = client.guilds.cache.get(serverId)?.name || null;
     const serverPlatforms = await getPlatformSettings(serverId, serverName);
@@ -227,6 +294,7 @@ export async function analyzeMusic(client, foundMessage) {
             );
         }
     );
+
     if (!link) return;
 
     const url = tryParseUrl(link);
@@ -235,7 +303,7 @@ export async function analyzeMusic(client, foundMessage) {
     const platform = Object.values(serverPlatforms).find(
         platform => platform.enabled &&
         matchesPlatform(url.hostname, platform.prefix)
-    );    
+    );
 
     const keep = keepParameters[platform?.key] ?? [];
     for (const param of [...url.searchParams.keys()]) {
@@ -252,7 +320,8 @@ export async function analyzeMusic(client, foundMessage) {
 
 
         // Fetch from Odesli
-        songData = await fetchOdesli(cleanLink, serverPlatforms.country, client, serverName);
+        // songData = await fetchOdesli(cleanLink, serverPlatforms.country, client, serverName);
+        songData = await fetchSongLink(cleanLink, serverPlatforms.country, client, serverName);
         if (songData) {
             checkedUrls.add(cleanLink);
         }
@@ -263,7 +332,6 @@ export async function analyzeMusic(client, foundMessage) {
             tidalTranslatedData  = await fetchTidal(tidalUrl, serverPlatforms.country, client, serverName);
         }
 
-        // 
         if ( tidalTranslatedData ) {
             if (!songData) {
                 songData = tidalTranslatedData;
@@ -279,21 +347,19 @@ export async function analyzeMusic(client, foundMessage) {
                     continue;
                 }
 
-                const extraOdesli = await fetchOdesli(platform.url, serverPlatforms.country, client, serverName);
+                // const extraOdesli = await fetchOdesli(platform.url, serverPlatforms.country, client, serverName);
+                const extraOdesli = await fetchSongLink(platform.url, serverPlatforms.country, client, serverName);
                 checkedUrls.add(platform.url);
 
                 songData = mergeOdesli(songData, extraOdesli);
             }
         }
 
-        if (!songData?.linksByPlatform) return;
+        if (!songData?.linksByPlatform) {
+            await devLog(client, link, "songData missing linksByPlatform", serverName)
+            return;
+	}
         const platforms = songData.linksByPlatform;
-
-        // Prevent duplicate YouTube embeds
-        const isOriginalLinkYouTube = platform?.key === 'youtube' || platform?.key === 'youtubeMusic'
-        const allAreYouTube = Object.keys(platforms).every(
-            key => key.toLowerCase().includes('youtube'));
-        if (isOriginalLinkYouTube && allAreYouTube) return;
 
         // Find the first ethically available embedded audio link
         const embeddedLink = platforms.soundcloud?.url 
@@ -304,7 +370,14 @@ export async function analyzeMusic(client, foundMessage) {
             || false;
 
         const serverCustoms = await getCustomSettings(serverId, serverName);
-        await foundMessage.suppressEmbeds(true);
+
+        const isOriginalLinkYouTube = platform?.key === 'youtube' || platform?.key === 'youtubeMusic';
+        if (!isOriginalLinkYouTube) {
+            await foundMessage.suppressEmbeds(true).catch(() => {});
+        }
+
+        const allAreYouTube = Object.keys(platforms).every(
+            key => key.toLowerCase().includes('youtube'));
 
         // Send Search Embed and hidden link to embed audio visualizer
         if (embeddedLink) {
@@ -312,7 +385,9 @@ export async function analyzeMusic(client, foundMessage) {
                 .setColor(serverCustoms.color)
                 .setTitle(serverCustoms.embed_search)
             await foundMessage.channel.send({ embeds: [searchEmbed], flags: MessageFlags.SuppressNotifications });
-            await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: MessageFlags.SuppressNotifications });
+            if ( !allAreYouTube && !isOriginalLinkYouTube ) {
+                await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: MessageFlags.SuppressNotifications });
+            }
         }
 
         // Extract Song Info
@@ -354,7 +429,7 @@ export async function analyzeMusic(client, foundMessage) {
         const finalEmbed = new EmbedBuilder()
             .setColor(serverCustoms.color)
             .setTitle(serverCustoms.embed_final)
-            .setDescription(`${title} - ${artist}`)
+            .setDescription(`\n**${title} - ${artist}**\n`)
             .setThumbnail(thumbnailUrl)
 
         await foundMessage.channel.send({
