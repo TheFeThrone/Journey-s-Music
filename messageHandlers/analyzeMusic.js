@@ -380,12 +380,15 @@ export async function analyzeMusic(client, foundMessage) {
             key => key.toLowerCase().includes('youtube'));
 
         // Send Search Embed and hidden link to embed audio visualizer
+        if ( allAreYouTube && isOriginalLinkYouTube ) {
+            return;
+        }
         if (embeddedLink) {
             const searchEmbed = new EmbedBuilder()
                 .setColor(serverCustoms.color)
                 .setTitle(serverCustoms.embed_search)
             await foundMessage.channel.send({ embeds: [searchEmbed], flags: MessageFlags.SuppressNotifications });
-            if ( !allAreYouTube && !isOriginalLinkYouTube ) {
+            if (!isOriginalLinkYouTube) {
                 await foundMessage.channel.send({content: `[    ♪♫♪](${embeddedLink})`, flags: MessageFlags.SuppressNotifications });
             }
         }
